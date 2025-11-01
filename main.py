@@ -34,6 +34,36 @@ class MyApplication(Gtk.Application):
         self.status_label = None
         self.installed_apps = self.get_installed_applications()
 
+        # Chat history for conversation continuity
+        self.chat_history = []
+        self.max_history_length = 10  # Keep last 10 exchanges
+
+    def add_to_history(self, user_message, ai_response):
+        """Add a conversation exchange to history"""
+        self.chat_history.append({
+            'user': user_message,
+            'ai': ai_response,
+            'timestamp': datetime.now()
+        })
+
+        # Keep only the most recent exchanges
+        if len(self.chat_history) > self.max_history_length:
+            self.chat_history = self.chat_history[-self.max_history_length:]
+
+    def get_formatted_history(self):
+        """Get formatted conversation history for context"""
+        if not self.chat_history:
+            return ""
+
+        history_lines = ["CONVERSATION HISTORY:"]
+        for i, exchange in enumerate(self.chat_history[-5:], 1):  # Last 5 exchanges
+            history_lines.append(f"Exchange {i}:")
+            history_lines.append(f"User: {exchange['user']}")
+            history_lines.append(f"AI: {exchange['ai']}")
+            history_lines.append("")
+
+        return "\n".join(history_lines)
+
     def setup_logging(self):
         """Setup logging configuration"""
         log_filename = f"ai_assistant_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
@@ -328,9 +358,13 @@ class MyApplication(Gtk.Application):
 
             self.logger.debug("Server check passed, preparing API request")
 
+            # Get conversation history
+            history_context = self.get_formatted_history()
+
             # Create enhanced prompt with tool information
             app_list = [app['name'] for app in self.installed_apps[:10]]  # First 10 apps
-            tool_context = f"""
+            tool_context = f"""{history_context}
+
 You are an AI assistant that can control the user's computer using tools. You have access to these tools:
 
 TOOL: open_app
@@ -376,6 +410,7 @@ INSTRUCTIONS:
 - Put parameters after PARAMETERS:
 - Use simple string format for parameters
 - Only call tools that are listed above
+- Remember our previous conversation for context
 
 User query: {prompt}
 """
@@ -543,6 +578,9 @@ User query: {prompt}
         if not prompt:
             return
 
+        # Store the prompt for history before clearing
+        self.last_user_prompt = prompt
+
         # Clear input
         self.entry.set_text("")
 
@@ -579,6 +617,12 @@ User query: {prompt}
 
             # Resize window to fit content after a short delay
             GLib.timeout_add(100, self.resize_window_to_fit_content)
+
+            # Add to conversation history (get the user prompt from the entry before clearing)
+            # Note: We need to get the prompt that was sent, but it's already cleared
+            # For now, we'll store the last prompt in the query method
+            if hasattr(self, 'last_user_prompt'):
+                self.add_to_history(self.last_user_prompt, response)
 
     def create_response_area(self):
         """Create the response area dynamically"""
