@@ -382,18 +382,18 @@ TOOL_CALL: close_window
 PARAMETERS: terminal
 
 TOOL: list_apps
-DESCRIPTION: Lists all installed applications on the system
+DESCRIPTION: Lists all installed applications on the system (no parameters needed)
 PARAMETERS: none required
 EXAMPLE: To see what applications are available
 TOOL_CALL: list_apps
 PARAMETERS:
 
 TOOL: open_file_browser
-DESCRIPTION: Opens the file manager at a specified directory path
+DESCRIPTION: Opens the file manager at a specified directory path (use this to open folders/directories)
 PARAMETERS: path (string) - Directory path to open (optional, defaults to home directory)
-EXAMPLE: To open the Documents folder
+EXAMPLE: To open the Projects folder
 TOOL_CALL: open_file_browser
-PARAMETERS: ~/Documents
+PARAMETERS: ~/Projects
 
 TOOL: system_info
 DESCRIPTION: Shows system information including CPU, memory, and disk usage
