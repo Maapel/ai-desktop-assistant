@@ -441,64 +441,93 @@ User query: {prompt}
             return error_msg
 
     def process_tool_call(self, response):
-        """Process a tool call from the AI response"""
+        """Process tool calls from the AI response (handles multiple tool calls)"""
         self.logger.debug(f"Processing tool call from response: {response[:200]}{'...' if len(response) > 200 else ''}")
 
         try:
-            # Extract tool call
-            tool_call_start = response.find("TOOL_CALL:")
-            if tool_call_start == -1:
-                self.logger.debug("No TOOL_CALL found in response")
-                return None
+            results = []
+            remaining_response = response
 
-            tool_part = response[tool_call_start:].strip()
-            self.logger.debug(f"Extracted tool part: {tool_part[:100]}{'...' if len(tool_part) > 100 else ''}")
+            # Process all tool calls in the response
+            while "TOOL_CALL:" in remaining_response:
+                # Extract tool call
+                tool_call_start = remaining_response.find("TOOL_CALL:")
+                if tool_call_start == -1:
+                    break
 
-            # Extract tool name
-            lines = tool_part.split('\n')
-            if len(lines) < 1:
-                self.logger.warning("Tool call has no lines")
-                return None
+                tool_part = remaining_response[tool_call_start:].strip()
+                self.logger.debug(f"Extracted tool part: {tool_part[:100]}{'...' if len(tool_part) > 100 else ''}")
 
-            tool_name = lines[0].replace("TOOL_CALL:", "").strip()
-            self.logger.info(f"Detected tool call: {tool_name}")
+                # Find the end of this tool call (next TOOL_CALL or end of response)
+                next_tool_call = tool_part.find("TOOL_CALL:", 1)
+                if next_tool_call != -1:
+                    # There are more tool calls, process only this one
+                    tool_part = tool_part[:next_tool_call].strip()
+                    remaining_response = remaining_response[tool_call_start + next_tool_call:]
+                else:
+                    # This is the last tool call
+                    remaining_response = ""
 
-            # Extract parameters
-            params = {}
-            if len(lines) > 1 and "PARAMETERS:" in lines[1]:
-                param_str = lines[1].replace("PARAMETERS:", "").strip()
-                try:
-                    params = json.loads(param_str)
-                except json.JSONDecodeError:
-                    # Try to parse simple format like "app_name: firefox"
-                    if ":" in param_str:
-                        # Split only on the first colon to handle values with colons
-                        key, value = param_str.split(":", 1)
-                        key = key.strip()
-                        value = value.strip().strip('"')  # Remove surrounding quotes if present
+                # Extract tool name
+                lines = tool_part.split('\n')
+                if len(lines) < 1:
+                    self.logger.warning("Tool call has no lines")
+                    continue
 
-                        # Map common parameter names
-                        if key in ["app_name", "app", "application"]:
-                            params["app_name"] = value
-                        elif key in ["window_title", "window", "title"]:
-                            params["window_title"] = value
+                tool_name = lines[0].replace("TOOL_CALL:", "").strip()
+                self.logger.info(f"Detected tool call: {tool_name}")
+
+                # Extract parameters
+                params = {}
+                if len(lines) > 1 and "PARAMETERS:" in lines[1]:
+                    param_str = lines[1].replace("PARAMETERS:", "").strip()
+                    try:
+                        params = json.loads(param_str)
+                    except json.JSONDecodeError:
+                        # Try to parse simple format like "app_name: firefox"
+                        if ":" in param_str:
+                            # Split only on the first colon to handle values with colons
+                            key, value = param_str.split(":", 1)
+                            key = key.strip()
+                            value = value.strip().strip('"')  # Remove surrounding quotes if present
+
+                            # Map common parameter names
+                            if key in ["app_name", "app", "application"]:
+                                params["app_name"] = value
+                            elif key in ["window_title", "window", "title"]:
+                                params["window_title"] = value
+                            elif key in ["path"]:
+                                params["path"] = value
+                            else:
+                                # For unknown keys, try to infer based on tool
+                                if tool_name == "open_app":
+                                    params["app_name"] = param_str  # Use entire string
+                                elif tool_name == "close_window":
+                                    params["window_title"] = param_str  # Use entire string
+                                elif tool_name == "open_file_browser":
+                                    params["path"] = param_str  # Use entire string
                         else:
-                            # For unknown keys, try to infer based on tool
+                            # Handle cases where AI just provides the value (assume based on tool)
+                            param_value = param_str.strip()
                             if tool_name == "open_app":
-                                params["app_name"] = param_str  # Use entire string
+                                params["app_name"] = param_value
                             elif tool_name == "close_window":
-                                params["window_title"] = param_str  # Use entire string
-                    else:
-                        # Handle cases where AI just provides the value (assume based on tool)
-                        param_value = param_str.strip()
-                        if tool_name == "open_app":
-                            params["app_name"] = param_value
-                        elif tool_name == "close_window":
-                            params["window_title"] = param_value
-                        # For list_apps, no parameters needed
+                                params["window_title"] = param_value
+                            elif tool_name == "open_file_browser":
+                                params["path"] = param_value
+                            # For list_apps and system_info, no parameters needed
 
-            # Execute tool
-            return self.execute_tool(tool_name, **params)
+                # Execute tool
+                result = self.execute_tool(tool_name, **params)
+                if result:
+                    results.append(result)
+                    self.logger.info(f"Tool executed successfully: {result}")
+
+            if results:
+                # Return combined results
+                return " | ".join(results)
+            else:
+                return None
 
         except Exception as e:
             return f"Error processing tool call: {e}"
