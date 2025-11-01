@@ -27,6 +27,7 @@ class TestToolParsing(unittest.TestCase):
         self.mock_run = self.run_patcher.start()
         self.mock_run.return_value = Mock(returncode=0, stdout="0x12345678  0 myhost Terminal\n")
 
+        # Create app instance after mocking is set up
         self.app = MyApplication()
 
     def tearDown(self):
@@ -36,19 +37,25 @@ class TestToolParsing(unittest.TestCase):
 
     def test_parse_open_app_simple_format(self):
         """Test parsing TOOL_CALL with simple app name."""
-        response = "TOOL_CALL: open_app\nPARAMETERS: firefox"
-        tool_result = self.app.process_tool_call(response)
+        with patch('subprocess.Popen') as mock_popen:
+            mock_popen.return_value = Mock()
+            response = "TOOL_CALL: open_app\nPARAMETERS: firefox"
+            tool_result = self.app.process_tool_call(response)
 
-        self.assertIsNotNone(tool_result)
-        self.assertIn("Opened", tool_result)  # Should return success message
+            self.assertIsNotNone(tool_result)
+            self.assertIn("Opened", tool_result)  # Should return success message
+            mock_popen.assert_called_once()
 
     def test_parse_open_app_json_format(self):
         """Test parsing TOOL_CALL with JSON parameters."""
-        response = 'TOOL_CALL: open_app\nPARAMETERS: {"app_name": "firefox"}'
-        tool_result = self.app.process_tool_call(response)
+        with patch('subprocess.Popen') as mock_popen:
+            mock_popen.return_value = Mock()
+            response = 'TOOL_CALL: open_app\nPARAMETERS: {"app_name": "firefox"}'
+            tool_result = self.app.process_tool_call(response)
 
-        self.assertIsNotNone(tool_result)
-        self.assertIn("Opened", tool_result)
+            self.assertIsNotNone(tool_result)
+            self.assertIn("Opened", tool_result)
+            mock_popen.assert_called_once()
 
     def test_parse_close_window_simple_format(self):
         """Test parsing close_window tool with simple format."""
@@ -105,14 +112,17 @@ class TestToolParsing(unittest.TestCase):
 
     def test_tool_call_with_extra_text(self):
         """Test tool call embedded in larger response."""
-        response = """I can help you open Firefox for browsing.
+        with patch('subprocess.Popen') as mock_popen:
+            mock_popen.return_value = Mock()
+            response = """I can help you open Firefox for browsing.
 TOOL_CALL: open_app
 PARAMETERS: firefox
 This should open the browser for you."""
-        tool_result = self.app.process_tool_call(response)
+            tool_result = self.app.process_tool_call(response)
 
-        self.assertIsNotNone(tool_result)
-        self.assertIn("Opened", tool_result)
+            self.assertIsNotNone(tool_result)
+            self.assertIn("Opened", tool_result)
+            mock_popen.assert_called_once()
 
     def test_case_insensitive_app_matching(self):
         """Test that app matching is case insensitive."""
@@ -121,10 +131,14 @@ This should open the browser for you."""
 
         for app_name in test_cases:
             with self.subTest(app_name=app_name):
-                response = f"TOOL_CALL: open_app\nPARAMETERS: {app_name}"
-                tool_result = self.app.process_tool_call(response)
-                # Should not crash, even if app not found
-                self.assertIsNotNone(tool_result)
+                with patch('subprocess.Popen') as mock_popen:
+                    mock_popen.return_value = Mock()
+                    response = f"TOOL_CALL: open_app\nPARAMETERS: {app_name}"
+                    tool_result = self.app.process_tool_call(response)
+                    # Should not crash, even if app not found
+                    self.assertIsNotNone(tool_result)
+                    if "Opened" in tool_result:
+                        mock_popen.assert_called()
 
 
 class TestApplicationDetection(unittest.TestCase):
@@ -222,14 +236,20 @@ class TestApplicationDetection(unittest.TestCase):
         self.assertIsNone(result)
 
         # TOOL_CALL at end of long response
-        long_response = "Here is some text\n" * 100 + "TOOL_CALL: open_app\nPARAMETERS: firefox"
-        result = self.app.process_tool_call(long_response)
-        self.assertIsNotNone(result)
+        with patch('subprocess.Popen') as mock_popen:
+            mock_popen.return_value = Mock()
+            long_response = "Here is some text\n" * 100 + "TOOL_CALL: open_app\nPARAMETERS: firefox"
+            result = self.app.process_tool_call(long_response)
+            self.assertIsNotNone(result)
+            mock_popen.assert_called_once()
 
         # Multiple TOOL_CALL markers
-        response = "TOOL_CALL: open_app\nPARAMETERS: firefox\nTOOL_CALL: close_window\nPARAMETERS: terminal"
-        result = self.app.process_tool_call(response)
-        self.assertIsNotNone(result)  # Should process first one
+        with patch('subprocess.Popen') as mock_popen:
+            mock_popen.return_value = Mock()
+            response = "TOOL_CALL: open_app\nPARAMETERS: firefox\nTOOL_CALL: close_window\nPARAMETERS: terminal"
+            result = self.app.process_tool_call(response)
+            self.assertIsNotNone(result)  # Should process first one
+            mock_popen.assert_called_once()
 
     def test_tool_execution_error_handling(self):
         """Test error handling in tool execution."""
