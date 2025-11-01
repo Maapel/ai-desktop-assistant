@@ -168,6 +168,107 @@ class MyApplication(Gtk.Application):
         except Exception as e:
             return f"Error closing window: {e}"
 
+    def open_file_browser(self, path=""):
+        """Open file browser at specified path using xdg-open"""
+        try:
+            if not path or path.strip() == "":
+                # Open home directory if no path specified
+                path = os.path.expanduser("~")
+
+            # Expand user path if it starts with ~
+            path = os.path.expanduser(path)
+
+            # Check if path exists
+            if not os.path.exists(path):
+                return f"Path '{path}' does not exist"
+
+            # Use xdg-open to open the directory
+            result = subprocess.run(['xdg-open', path], capture_output=True, text=True)
+            if result.returncode == 0:
+                return f"Opened file browser at: {path}"
+            else:
+                return f"Failed to open file browser: {result.stderr}"
+
+        except FileNotFoundError:
+            return "xdg-open not found. Please install xdg-utils package."
+        except Exception as e:
+            return f"Error opening file browser: {e}"
+
+    def get_system_info(self):
+        """Get basic system information (CPU, memory usage)"""
+        try:
+            info_lines = []
+
+            # CPU usage
+            try:
+                with open('/proc/stat', 'r') as f:
+                    cpu_line = f.readline().strip()
+                    cpu_fields = cpu_line.split()[1:]
+                    total_time = sum(int(x) for x in cpu_fields)
+                    idle_time = int(cpu_fields[3])
+
+                    # Get a second reading for CPU usage calculation
+                    import time
+                    time.sleep(0.1)
+                    with open('/proc/stat', 'r') as f2:
+                        cpu_line2 = f2.readline().strip()
+                        cpu_fields2 = cpu_line2.split()[1:]
+                        total_time2 = sum(int(x) for x in cpu_fields2)
+                        idle_time2 = int(cpu_fields2[3])
+
+                    total_diff = total_time2 - total_time
+                    idle_diff = idle_time2 - idle_time
+
+                    if total_diff > 0:
+                        cpu_usage = ((total_diff - idle_diff) / total_diff) * 100
+                        info_lines.append(f"CPU Usage: {cpu_usage:.1f}%")
+                    else:
+                        info_lines.append("CPU Usage: Unable to calculate")
+            except:
+                info_lines.append("CPU Usage: Not available")
+
+            # Memory usage
+            try:
+                with open('/proc/meminfo', 'r') as f:
+                    mem_lines = f.readlines()
+                    mem_total = None
+                    mem_available = None
+
+                    for line in mem_lines:
+                        if line.startswith('MemTotal:'):
+                            mem_total = int(line.split()[1])  # in KB
+                        elif line.startswith('MemAvailable:'):
+                            mem_available = int(line.split()[1])  # in KB
+
+                    if mem_total and mem_available:
+                        mem_used = mem_total - mem_available
+                        mem_usage_percent = (mem_used / mem_total) * 100
+                        mem_used_gb = mem_used / (1024 * 1024)  # Convert to GB
+                        mem_total_gb = mem_total / (1024 * 1024)
+                        info_lines.append(f"Memory: {mem_used_gb:.1f}GB / {mem_total_gb:.1f}GB ({mem_usage_percent:.1f}%)")
+                    else:
+                        info_lines.append("Memory: Information not available")
+            except:
+                info_lines.append("Memory: Not available")
+
+            # Disk usage for root filesystem
+            try:
+                result = subprocess.run(['df', '-h', '/'], capture_output=True, text=True)
+                if result.returncode == 0:
+                    lines = result.stdout.strip().split('\n')
+                    if len(lines) >= 2:
+                        disk_info = lines[1].split()
+                        if len(disk_info) >= 5:
+                            disk_usage = f"Disk (/): {disk_info[2]} / {disk_info[1]} ({disk_info[4]})"
+                            info_lines.append(disk_usage)
+            except:
+                info_lines.append("Disk: Not available")
+
+            return "System Information:\n" + "\n".join(f"• {line}" for line in info_lines)
+
+        except Exception as e:
+            return f"Error getting system information: {e}"
+
     def execute_tool(self, tool_name, **kwargs):
         """Execute a tool based on name and parameters"""
         if tool_name == "open_app":
@@ -179,6 +280,11 @@ class MyApplication(Gtk.Application):
         elif tool_name == "list_apps":
             app_list = [app['name'] for app in self.installed_apps[:20]]  # Limit to first 20
             return f"Installed applications (first 20): {', '.join(app_list)}"
+        elif tool_name == "open_file_browser":
+            path = kwargs.get('path', '')
+            return self.open_file_browser(path)
+        elif tool_name == "system_info":
+            return self.get_system_info()
         else:
             return f"Unknown tool: {tool_name}"
 
@@ -229,6 +335,8 @@ You are an AI assistant with access to various tools. Available tools:
 - open_app: Open an installed application (parameters: app_name) - Opens any installed application by name
 - close_window: Close a window by title (parameters: window_title) - Closes windows by their title
 - list_apps: List installed applications - Shows all available applications (no parameters needed)
+- open_file_browser: Open file browser at path (parameters: path) - Opens file manager at specified directory, defaults to home if no path given
+- system_info: Show system information - Displays CPU, memory, and disk usage (no parameters needed)
 
 Common applications include: {', '.join(app_list)}
 

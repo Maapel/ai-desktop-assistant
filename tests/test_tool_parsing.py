@@ -265,6 +265,51 @@ class TestApplicationDetection(unittest.TestCase):
         result = self.app.execute_tool("close_window", window_title=None)
         self.assertIsInstance(result, str)  # Should handle gracefully
 
+    def test_open_file_browser_tool(self):
+        """Test file browser opening functionality."""
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = Mock(returncode=0, stdout="", stderr="")
+
+            # Test with valid path (use existing path)
+            result = self.app.open_file_browser("/tmp")
+            self.assertIn("Opened file browser", result)
+            mock_run.assert_called_with(['xdg-open', '/tmp'], capture_output=True, text=True)
+
+            # Test with empty path (should default to home)
+            result = self.app.open_file_browser("")
+            self.assertIn("Opened file browser", result)
+            # Should call with expanded home directory
+
+    def test_system_info_tool(self):
+        """Test system information retrieval."""
+        result = self.app.get_system_info()
+        self.assertIsInstance(result, str)
+        self.assertIn("System Information", result)
+
+        # Should contain some basic info
+        lines = result.split('\n')
+        self.assertGreater(len(lines), 1)  # Should have header + at least one info line
+
+    def test_parse_open_file_browser(self):
+        """Test parsing open_file_browser tool calls."""
+        with patch('subprocess.run') as mock_run:
+            mock_run.return_value = Mock(returncode=0, stdout="", stderr="")
+
+            response = "TOOL_CALL: open_file_browser\nPARAMETERS: /home/user"
+            tool_result = self.app.process_tool_call(response)
+
+            self.assertIsNotNone(tool_result)
+            self.assertIn("Opened file browser", tool_result)
+            mock_run.assert_called_once()
+
+    def test_parse_system_info(self):
+        """Test parsing system_info tool calls."""
+        response = "TOOL_CALL: system_info\nPARAMETERS:"
+        tool_result = self.app.process_tool_call(response)
+
+        self.assertIsNotNone(tool_result)
+        self.assertIn("System Information", tool_result)
+
 
 if __name__ == '__main__':
     unittest.main()

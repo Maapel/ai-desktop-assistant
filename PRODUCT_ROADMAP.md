@@ -215,12 +215,12 @@ Build an open-source AI assistant that makes computer interaction more accessibl
   - [ ] System tray integration for background operation
 
 #### Core Feature Additions (Next 2-4 months)
-- [ ] **Enhanced Tool Set**
-  - File browser integration (xdg-open for directories)
-  - Web browser controls (new tab, basic navigation)
-  - Media player integration (play/pause/volume for common players)
-  - Basic system information display (CPU, memory usage)
-  - Better window management (focus switching, minimize/maximize)
+- [x] **Enhanced Tool Set**
+  - [x] File browser integration (xdg-open for directories)
+  - [ ] Web browser controls (new tab, basic navigation)
+  - [ ] Media player integration (play/pause/volume for common players)
+  - [x] Basic system information display (CPU, memory usage)
+  - [ ] Better window management (focus switching, minimize/maximize)
 
 - [ ] **Configuration & Settings**
   - User preferences and settings storage
