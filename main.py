@@ -548,7 +548,7 @@ User query: {prompt}
             end_iter = buffer.get_end_iter()
             buffer.insert(end_iter, char)
             # Resize window based on content
-            GLib.idle_add(self.resize_window_to_content)
+            GLib.idle_add(self.resize_window_to_fit_content)
 
     def start_streaming(self):
         """Initialize streaming response"""
