@@ -25,6 +25,7 @@ class MyApplication(Gtk.Application):
         self.is_dragging = False
         self.response_text = None
         self.entry = None
+        self.status_label = None
         self.installed_apps = self.get_installed_applications()
 
     def get_installed_applications(self):
@@ -323,6 +324,10 @@ User query: {prompt}
         # Clear input
         self.entry.set_text("")
 
+        # Show thinking status
+        if self.status_label:
+            self.status_label.set_text("🤖 Thinking...")
+
         # Run Ollama query in a separate thread
         def run_query():
             response = self.query_ollama(prompt)
@@ -334,14 +339,24 @@ User query: {prompt}
 
     def show_response(self, response):
         """Show the full response and resize window"""
+        # Clear thinking status
+        if self.status_label:
+            self.status_label.set_text("")
+
         # Create response area if it doesn't exist
         if not self.response_text:
             self.create_response_area()
 
         if self.response_text:
-            self.response_text.get_buffer().set_text(response)
-            # Resize window to fit content
-            self.resize_window_to_fit_content()
+            # Clear any previous content
+            buffer = self.response_text.get_buffer()
+            buffer.set_text("")
+
+            # Show typing effect for better UX
+            self.simulate_typing(response)
+
+            # Resize window to fit content after a short delay
+            GLib.timeout_add(100, self.resize_window_to_fit_content)
 
     def create_response_area(self):
         """Create the response area dynamically"""
@@ -464,6 +479,21 @@ User query: {prompt}
         if n_press == 1:  # Left mouse button
             self.is_dragging = False
 
+    def on_key_pressed(self, controller, keyval, keycode, state):
+        """Handle keyboard shortcuts"""
+        # Enter key to send message
+        if keyval == Gdk.KEY_Return or keyval == Gdk.KEY_KP_Enter:
+            self.on_send_clicked(None)
+            return True
+
+        # Escape key to clear input
+        elif keyval == Gdk.KEY_Escape:
+            if self.entry:
+                self.entry.set_text("")
+            return True
+
+        return False
+
     def do_activate(self):
         print("Application activating...")
 
@@ -549,6 +579,12 @@ User query: {prompt}
             box-shadow: 0 0 5px rgba(0, 150, 255, 0.3);
             color: rgba(0, 150, 255, 1.0);
         }
+        .status-label {
+            color: rgba(0, 200, 255, 0.8);
+            font-size: 11px;
+            font-style: italic;
+            text-align: center;
+        }
         """
         css_provider.load_from_data(css.encode())
 
@@ -576,6 +612,14 @@ User query: {prompt}
         self.background_panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.background_panel.set_css_classes(["background-panel"])
 
+        # Create status label
+        self.status_label = Gtk.Label(label="")
+        self.status_label.set_css_classes(["status-label"])
+        self.status_label.set_margin_start(10)
+        self.status_label.set_margin_end(10)
+        self.status_label.set_margin_bottom(5)
+        self.background_panel.append(self.status_label)
+
         # Create input area (horizontal box)
         input_hbox = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
         input_hbox.set_margin_top(5)
@@ -587,6 +631,12 @@ User query: {prompt}
         self.entry = Gtk.Entry()
         self.entry.set_placeholder_text("Enter your prompt here...")
         self.entry.set_hexpand(True)
+
+        # Add keyboard shortcuts
+        key_controller = Gtk.EventControllerKey()
+        key_controller.connect("key-pressed", self.on_key_pressed)
+        self.entry.add_controller(key_controller)
+
         input_hbox.append(self.entry)
 
         # Create the send button
