@@ -70,6 +70,9 @@ class MyApplication(Gtk.Application):
 
     def open_application(self, app_name):
         """Open an application by name"""
+        if not app_name or not app_name.strip():
+            return "Application name cannot be empty"
+
         app_name_lower = app_name.lower().strip()
         print(f"[DEBUG] Looking for app: '{app_name}' (lowercased: '{app_name_lower}')")
 
