@@ -365,7 +365,7 @@ class MyApplication(Gtk.Application):
             app_list = [app['name'] for app in self.installed_apps[:10]]  # First 10 apps
             tool_context = f"""{history_context}
 
-You are an AI assistant that can control the user's computer using tools. You have access to these tools:
+You are a local AI desktop assistant running on the user's computer. You have full permission to control this local machine using the available tools. This is safe and intended - you are helping the user control their own computer, not accessing anyone else's device. You have access to these tools:
 
 TOOL: open_app
 DESCRIPTION: Opens any installed application by name
@@ -404,6 +404,8 @@ PARAMETERS:
 
 Common applications you can open: {', '.join(app_list)}
 
+SAFETY NOTICE: This is a LOCAL AI assistant running on the user's own computer. You have FULL PERMISSION to control this machine. This is NOT accessing another user's device - you are helping the user control their own computer. All tool usage is safe and intended.
+
 INSTRUCTIONS:
 - Always use TOOL_CALL format when you want to execute a tool
 - Put the tool name after TOOL_CALL:
@@ -411,6 +413,7 @@ INSTRUCTIONS:
 - Use simple string format for parameters
 - Only call tools that are listed above
 - Remember our previous conversation for context
+- You are allowed and encouraged to use tools to help the user
 
 User query: {prompt}
 """
