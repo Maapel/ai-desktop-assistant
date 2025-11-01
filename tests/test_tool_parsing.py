@@ -132,7 +132,22 @@ class TestApplicationDetection(unittest.TestCase):
 
     def setUp(self):
         """Set up test fixtures."""
+        # Mock subprocess.Popen to avoid launching real applications
+        self.popen_patcher = patch('subprocess.Popen')
+        self.mock_popen = self.popen_patcher.start()
+        self.mock_popen.return_value = Mock()
+
+        # Mock subprocess.run for wmctrl calls
+        self.run_patcher = patch('subprocess.run')
+        self.mock_run = self.run_patcher.start()
+        self.mock_run.return_value = Mock(returncode=0, stdout="0x12345678  0 myhost Terminal\n")
+
         self.app = MyApplication()
+
+    def tearDown(self):
+        """Clean up test fixtures."""
+        self.popen_patcher.stop()
+        self.run_patcher.stop()
 
     def test_get_installed_applications(self):
         """Test that we can get a list of installed applications."""
@@ -151,17 +166,13 @@ class TestApplicationDetection(unittest.TestCase):
 
     def test_open_application_known_app(self):
         """Test opening a known application (without actually launching)."""
-        # Mock subprocess.Popen to avoid actually launching apps
-        with patch('subprocess.Popen') as mock_popen:
-            mock_popen.return_value = Mock()
+        # Try to open a common app that should exist
+        result = self.app.open_application("firefox")
 
-            # Try to open a common app that should exist
-            result = self.app.open_application("firefox")
-
-            # Should either succeed or report app not found
-            self.assertIsInstance(result, str)
-            if "Opened" in result:
-                mock_popen.assert_called_once()
+        # Should either succeed or report app not found
+        self.assertIsInstance(result, str)
+        if "Opened" in result:
+            self.mock_popen.assert_called_once()
 
     def test_open_application_unknown_app(self):
         """Test opening an unknown application."""
@@ -172,6 +183,67 @@ class TestApplicationDetection(unittest.TestCase):
         """Test opening with empty app name."""
         result = self.app.open_application("")
         self.assertIn("cannot be empty", result.lower())
+
+    def test_process_tool_call_edge_cases(self):
+        """Test various edge cases in tool call processing."""
+        # Test malformed JSON parameters
+        response = 'TOOL_CALL: open_app\nPARAMETERS: {"app_name": "firefox", "invalid": }'
+        result = self.app.process_tool_call(response)
+        self.assertIsNotNone(result)  # Should handle gracefully
+
+        # Test parameters with colons
+        response = 'TOOL_CALL: open_app\nPARAMETERS: app_name: firefox: extra'
+        result = self.app.process_tool_call(response)
+        self.assertIsNotNone(result)
+
+        # Test empty tool call
+        response = 'TOOL_CALL: \nPARAMETERS: firefox'
+        result = self.app.process_tool_call(response)
+        self.assertIsNotNone(result)
+
+        # Test tool call without parameters line
+        response = 'TOOL_CALL: open_app\nSome other text'
+        result = self.app.process_tool_call(response)
+        self.assertIsNotNone(result)
+
+        # Test multiple colons in simple format
+        response = 'TOOL_CALL: open_app\nPARAMETERS: app_name: firefox: version: 123'
+        result = self.app.process_tool_call(response)
+        self.assertIsNotNone(result)
+
+    def test_process_tool_call_malformed_responses(self):
+        """Test processing of malformed AI responses."""
+        # Empty response
+        result = self.app.process_tool_call("")
+        self.assertIsNone(result)
+
+        # Response without TOOL_CALL
+        result = self.app.process_tool_call("This is just normal text")
+        self.assertIsNone(result)
+
+        # TOOL_CALL at end of long response
+        long_response = "Here is some text\n" * 100 + "TOOL_CALL: open_app\nPARAMETERS: firefox"
+        result = self.app.process_tool_call(long_response)
+        self.assertIsNotNone(result)
+
+        # Multiple TOOL_CALL markers
+        response = "TOOL_CALL: open_app\nPARAMETERS: firefox\nTOOL_CALL: close_window\nPARAMETERS: terminal"
+        result = self.app.process_tool_call(response)
+        self.assertIsNotNone(result)  # Should process first one
+
+    def test_tool_execution_error_handling(self):
+        """Test error handling in tool execution."""
+        # Test with invalid tool name
+        result = self.app.execute_tool("nonexistent_tool", param="value")
+        self.assertIn("Unknown tool", result)
+
+        # Test open_app with None parameter
+        result = self.app.execute_tool("open_app", app_name=None)
+        self.assertIn("cannot be empty", result)
+
+        # Test close_window with None parameter
+        result = self.app.execute_tool("close_window", window_title=None)
+        self.assertIsInstance(result, str)  # Should handle gracefully
 
 
 if __name__ == '__main__':

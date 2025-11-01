@@ -6,6 +6,8 @@ import os
 import re
 import requests
 import time
+import logging
+from datetime import datetime
 
 import gi
 
@@ -18,6 +20,10 @@ class MyApplication(Gtk.Application):
     def __init__(self):
         super().__init__(application_id="com.example.MyGtkApplication")
         GLib.set_application_name('AI Assistant')
+
+        # Setup logging
+        self.setup_logging()
+
         self.drag_start_x = 0
         self.drag_start_y = 0
         self.window_start_x = 0
@@ -28,8 +34,30 @@ class MyApplication(Gtk.Application):
         self.status_label = None
         self.installed_apps = self.get_installed_applications()
 
+    def setup_logging(self):
+        """Setup logging configuration"""
+        log_filename = f"ai_assistant_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+        log_path = os.path.join(os.path.expanduser("~"), ".ai_assistant", "logs", log_filename)
+
+        # Create log directory if it doesn't exist
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+
+        # Configure logging
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            handlers=[
+                logging.FileHandler(log_path),
+                logging.StreamHandler()  # Also log to console
+            ]
+        )
+
+        self.logger = logging.getLogger('AIAssistant')
+        self.logger.info("AI Assistant logging initialized")
+
     def get_installed_applications(self):
         """Get list of installed applications"""
+        self.logger.info("Starting application discovery")
         apps = []
 
         try:
@@ -40,10 +68,13 @@ class MyApplication(Gtk.Application):
                 os.path.expanduser("~/.local/share/applications")
             ]
 
+            total_files = 0
             for desktop_dir in desktop_dirs:
                 if os.path.exists(desktop_dir):
+                    self.logger.debug(f"Scanning directory: {desktop_dir}")
                     for file in os.listdir(desktop_dir):
                         if file.endswith('.desktop'):
+                            total_files += 1
                             desktop_file = os.path.join(desktop_dir, file)
                             try:
                                 with open(desktop_file, 'r', encoding='utf-8') as f:
@@ -61,10 +92,14 @@ class MyApplication(Gtk.Application):
                                             'exec': exec_cmd,
                                             'desktop_file': file
                                         })
-                            except:
+                            except Exception as e:
+                                self.logger.warning(f"Error reading desktop file {desktop_file}: {e}")
                                 continue
 
+            self.logger.info(f"Application discovery complete. Found {len(apps)} applications from {total_files} desktop files")
+
         except Exception as e:
+            self.logger.error(f"Error getting installed applications: {e}")
             print(f"Error getting installed applications: {e}")
 
         return apps
@@ -176,16 +211,16 @@ class MyApplication(Gtk.Application):
 
     def query_ollama(self, prompt):
         """Send prompt to Ollama phi3 model via HTTP API"""
-        print(f"[DEBUG] Starting query_ollama with prompt: {prompt}")
+        self.logger.info(f"Processing user prompt: {prompt[:100]}{'...' if len(prompt) > 100 else ''}")
 
         try:
             # Ensure server is running
-            print("[DEBUG] Ensuring Ollama server is running...")
+            self.logger.debug("Ensuring Ollama server is running...")
             if not self.ensure_ollama_server():
-                print("[DEBUG] Failed to start Ollama server")
+                self.logger.error("Failed to start Ollama server")
                 return "Error: Could not start Ollama server"
 
-            print("[DEBUG] Server check passed, preparing API request")
+            self.logger.debug("Server check passed, preparing API request")
 
             # Create enhanced prompt with tool information
             app_list = [app['name'] for app in self.installed_apps[:10]]  # First 10 apps
@@ -271,20 +306,26 @@ User query: {prompt}
 
     def process_tool_call(self, response):
         """Process a tool call from the AI response"""
+        self.logger.debug(f"Processing tool call from response: {response[:200]}{'...' if len(response) > 200 else ''}")
+
         try:
             # Extract tool call
             tool_call_start = response.find("TOOL_CALL:")
             if tool_call_start == -1:
+                self.logger.debug("No TOOL_CALL found in response")
                 return None
 
             tool_part = response[tool_call_start:].strip()
+            self.logger.debug(f"Extracted tool part: {tool_part[:100]}{'...' if len(tool_part) > 100 else ''}")
 
             # Extract tool name
             lines = tool_part.split('\n')
             if len(lines) < 1:
+                self.logger.warning("Tool call has no lines")
                 return None
 
             tool_name = lines[0].replace("TOOL_CALL:", "").strip()
+            self.logger.info(f"Detected tool call: {tool_name}")
 
             # Extract parameters
             params = {}
@@ -292,17 +333,33 @@ User query: {prompt}
                 param_str = lines[1].replace("PARAMETERS:", "").strip()
                 try:
                     params = json.loads(param_str)
-                except:
+                except json.JSONDecodeError:
                     # Try to parse simple format like "app_name: firefox"
                     if ":" in param_str:
+                        # Split only on the first colon to handle values with colons
                         key, value = param_str.split(":", 1)
-                        params[key.strip()] = value.strip().strip('"')
+                        key = key.strip()
+                        value = value.strip().strip('"')  # Remove surrounding quotes if present
+
+                        # Map common parameter names
+                        if key in ["app_name", "app", "application"]:
+                            params["app_name"] = value
+                        elif key in ["window_title", "window", "title"]:
+                            params["window_title"] = value
+                        else:
+                            # For unknown keys, try to infer based on tool
+                            if tool_name == "open_app":
+                                params["app_name"] = param_str  # Use entire string
+                            elif tool_name == "close_window":
+                                params["window_title"] = param_str  # Use entire string
                     else:
-                        # Handle cases where AI just provides the value (assume it's app_name)
+                        # Handle cases where AI just provides the value (assume based on tool)
+                        param_value = param_str.strip()
                         if tool_name == "open_app":
-                            params["app_name"] = param_str.strip()
+                            params["app_name"] = param_value
                         elif tool_name == "close_window":
-                            params["window_title"] = param_str.strip()
+                            params["window_title"] = param_value
+                        # For list_apps, no parameters needed
 
             # Execute tool
             return self.execute_tool(tool_name, **params)
