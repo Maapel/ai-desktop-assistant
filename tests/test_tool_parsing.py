@@ -17,7 +17,22 @@ class TestToolParsing(unittest.TestCase):
 
     def setUp(self):
         """Set up test fixtures."""
+        # Mock subprocess.Popen to avoid launching real applications
+        self.popen_patcher = patch('subprocess.Popen')
+        self.mock_popen = self.popen_patcher.start()
+        self.mock_popen.return_value = Mock()
+
+        # Mock subprocess.run for wmctrl calls
+        self.run_patcher = patch('subprocess.run')
+        self.mock_run = self.run_patcher.start()
+        self.mock_run.return_value = Mock(returncode=0, stdout="0x12345678  0 myhost Terminal\n")
+
         self.app = MyApplication()
+
+    def tearDown(self):
+        """Clean up test fixtures."""
+        self.popen_patcher.stop()
+        self.run_patcher.stop()
 
     def test_parse_open_app_simple_format(self):
         """Test parsing TOOL_CALL with simple app name."""
