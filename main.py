@@ -547,8 +547,7 @@ User query: {prompt}
             buffer = self.response_text.get_buffer()
             end_iter = buffer.get_end_iter()
             buffer.insert(end_iter, char)
-            # Resize window based on content
-            GLib.idle_add(self.resize_window_to_fit_content)
+            # Don't resize on every character to avoid flickering
 
     def start_streaming(self):
         """Initialize streaming response"""
@@ -593,7 +592,33 @@ User query: {prompt}
             new_height = 20 + 60 + estimated_height + 20
             new_height = min(new_height, 600)  # Cap at 600px
             new_height = max(new_height, 200)  # Minimum 200px
-            window.set_default_size(current_width, new_height)
+
+            print(f"[DEBUG] Resizing window: {current_width}x{new_height}")
+
+            # For GTK4, try to resize the window surface directly
+            try:
+                # Try setting default size first
+                window.set_default_size(current_width, new_height)
+
+                # Try to get the surface and resize it
+                surface = window.get_surface()
+                if surface:
+                    # Try to resize the surface directly
+                    try:
+                        surface.set_size_request(current_width, new_height)
+                    except:
+                        pass
+
+                # Force layout update
+                window.queue_resize()
+
+            except Exception as e:
+                print(f"[DEBUG] Window resize failed: {e}")
+                # Fallback: just set default size
+                try:
+                    window.set_default_size(current_width, new_height)
+                except:
+                    pass
 
     def on_button_press(self, controller, n_press, x, y):
         """Handle mouse button press for dragging"""
