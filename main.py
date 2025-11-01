@@ -331,23 +331,51 @@ class MyApplication(Gtk.Application):
             # Create enhanced prompt with tool information
             app_list = [app['name'] for app in self.installed_apps[:10]]  # First 10 apps
             tool_context = f"""
-You are an AI assistant with access to various tools. Available tools:
-- open_app: Open an installed application (parameters: app_name) - Opens any installed application by name
-- close_window: Close a window by title (parameters: window_title) - Closes windows by their title
-- list_apps: List installed applications - Shows all available applications (no parameters needed)
-- open_file_browser: Open file browser at path (parameters: path) - Opens file manager at specified directory, defaults to home if no path given
-- system_info: Show system information - Displays CPU, memory, and disk usage (no parameters needed)
+You are an AI assistant that can control the user's computer using tools. You have access to these tools:
 
-Common applications include: {', '.join(app_list)}
-
-IMPORTANT: When calling tools, provide parameters as simple strings, not complex JSON objects.
-For example:
+TOOL: open_app
+DESCRIPTION: Opens any installed application by name
+PARAMETERS: app_name (string) - The name of the application to open
+EXAMPLE: To open Firefox browser
 TOOL_CALL: open_app
 PARAMETERS: firefox
 
-Or for JSON format:
-TOOL_CALL: open_app
-PARAMETERS: {{"app_name": "firefox"}}
+TOOL: close_window
+DESCRIPTION: Closes a window by its title
+PARAMETERS: window_title (string) - The title of the window to close
+EXAMPLE: To close a terminal window
+TOOL_CALL: close_window
+PARAMETERS: terminal
+
+TOOL: list_apps
+DESCRIPTION: Lists all installed applications on the system
+PARAMETERS: none required
+EXAMPLE: To see what applications are available
+TOOL_CALL: list_apps
+PARAMETERS:
+
+TOOL: open_file_browser
+DESCRIPTION: Opens the file manager at a specified directory path
+PARAMETERS: path (string) - Directory path to open (optional, defaults to home directory)
+EXAMPLE: To open the Documents folder
+TOOL_CALL: open_file_browser
+PARAMETERS: ~/Documents
+
+TOOL: system_info
+DESCRIPTION: Shows system information including CPU, memory, and disk usage
+PARAMETERS: none required
+EXAMPLE: To check system performance
+TOOL_CALL: system_info
+PARAMETERS:
+
+Common applications you can open: {', '.join(app_list)}
+
+INSTRUCTIONS:
+- Always use TOOL_CALL format when you want to execute a tool
+- Put the tool name after TOOL_CALL:
+- Put parameters after PARAMETERS:
+- Use simple string format for parameters
+- Only call tools that are listed above
 
 User query: {prompt}
 """
