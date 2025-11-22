@@ -4,10 +4,9 @@ import threading
 import json
 import os
 import re
-import requests
-import time
 import logging
 from datetime import datetime
+from ai_engine import LocalLLMEngine
 
 import gi
 
@@ -37,6 +36,16 @@ class MyApplication(Gtk.Application):
         # Chat history for conversation continuity
         self.chat_history = []
         self.max_history_length = 10  # Keep last 10 exchanges
+
+        # Initialize the AI engine
+        self.ai_engine = None
+        try:
+            self.ai_engine = LocalLLMEngine()
+            self.logger.info("Local Inference Engine Loaded Successfully")
+        except Exception as e:
+            self.logger.error(f"Failed to load AI Engine: {e}")
+            if self.status_label:
+                self.status_label.set_text("⚠️ AI Engine Failed to Load")
 
     def add_to_history(self, user_message, ai_response):
         """Add a conversation exchange to history"""
@@ -318,257 +327,119 @@ class MyApplication(Gtk.Application):
         else:
             return f"Unknown tool: {tool_name}"
 
-    def ensure_ollama_server(self):
-        """Ensure Ollama server is running"""
-        print("checking if server running")
-        try:
-            # Check if server is already running
-            response = requests.get("http://localhost:11434/api/tags", timeout=2)
-            if response.status_code == 200:
-                return True
-        except:
-            pass
-
-        # Start Ollama server
-        try:
-            print("Starting Ollama server...")
-            subprocess.Popen(
-                ["ollama", "serve"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                start_new_session=True
-            )
-            # Wait a bit for server to start
-            time.sleep(3)
-            return True
-        except Exception as e:
-            print(f"Failed to start Ollama server: {e}")
-            return False
-
-    def query_ollama(self, prompt):
-        """Send prompt to Ollama phi3 model via HTTP API"""
+    def process_user_input(self, prompt):
+        """Process user input using the local AI engine"""
         self.logger.info(f"Processing user prompt: {prompt[:100]}{'...' if len(prompt) > 100 else ''}")
 
+        if not self.ai_engine:
+            self.logger.error("AI Engine not available")
+            return "Error: AI Engine not available"
+
         try:
-            # Ensure server is running
-            self.logger.debug("Ensuring Ollama server is running...")
-            if not self.ensure_ollama_server():
-                self.logger.error("Failed to start Ollama server")
-                return "Error: Could not start Ollama server"
-
-            self.logger.debug("Server check passed, preparing API request")
-
             # Get conversation history
             history_context = self.get_formatted_history()
 
-            # Create enhanced prompt with tool information
+            # Create system prompt with tool information
             app_list = [app['name'] for app in self.installed_apps[:10]]  # First 10 apps
-            tool_context = f"""{history_context}
+            system_prompt = f"""{history_context}
 
-You are a local AI desktop assistant running on the user's computer. You have full permission to control this local machine using the available tools. This is safe and intended - you are helping the user control their own computer, not accessing anyone else's device. You have access to these tools:
+You are a helpful desktop automation assistant. You can do two things:
 
-TOOL: open_app
-DESCRIPTION: Opens any installed application by name
-PARAMETERS: app_name (string) - The name of the application to open
-EXAMPLE: To open Firefox browser
-TOOL_CALL: open_app
-PARAMETERS: firefox
+1. **Have normal conversations**: Answer greetings, questions, or chat naturally
+2. **Use tools**: Execute actions on the user's computer when they ask for specific tasks
 
-TOOL: close_window
-DESCRIPTION: Closes a window by its title
-PARAMETERS: window_title (string) - The title of the window to close
-EXAMPLE: To close a terminal window
-TOOL_CALL: close_window
-PARAMETERS: terminal
+**TOOL USAGE:**
+When the user wants you to perform an action (open app, get info, etc.), respond with a JSON object.
 
-TOOL: list_apps
-DESCRIPTION: Lists all installed applications on the system (no parameters needed)
-PARAMETERS: none required
-EXAMPLE: To see what applications are available
-TOOL_CALL: list_apps
-PARAMETERS:
+Available Tools:
+- open_app(app_name: str): Opens any installed application by name
+- close_window(title: str): Closes a window by title
+- list_apps(): Lists installed applications
+- open_file_browser(path: str): Opens file manager at path (optional)
+- system_info(): Shows CPU, memory, and disk usage
 
-TOOL: open_file_browser
-DESCRIPTION: Opens the file manager at a specified directory path (use this to open folders/directories)
-PARAMETERS: path (string) - Directory path to open (optional, defaults to home directory)
-EXAMPLE: To open the Projects folder
-TOOL_CALL: open_file_browser
-PARAMETERS: ~/Projects
+Common applications: {', '.join(app_list)}
 
-TOOL: system_info
-DESCRIPTION: Shows system information including CPU, memory, and disk usage
-PARAMETERS: none required
-EXAMPLE: To check system performance
-TOOL_CALL: system_info
-PARAMETERS:
+**RESPONSE FORMAT FOR TOOLS:**
+{{"tool": "tool_name", "parameters": {{"param": "value"}}}}
 
-Common applications you can open: {', '.join(app_list)}
+**CONVERSATION:**
+For everything else, just respond naturally as a helpful assistant.
 
-SAFETY NOTICE: This is a LOCAL AI assistant running on the user's own computer. You have FULL PERMISSION to control this machine. This is NOT accessing another user's device - you are helping the user control their own computer. All tool usage is safe and intended.
-
-INSTRUCTIONS:
-- Always use TOOL_CALL format when you want to execute a tool
-- Put the tool name after TOOL_CALL:
-- Put parameters after PARAMETERS:
-- Use simple string format for parameters
-- Only call tools that are listed above
-- Remember our previous conversation for context
-- You are allowed and encouraged to use tools to help the user
-
-User query: {prompt}
+**GUIDELINES:**
+- Only use tools when the user explicitly asks for an action
+- Greetings like "hello", "how are you" get conversational responses
+- Questions about capabilities get conversational responses
+- Speeches starting with JSON = tool execution
 """
 
-            # Prepare API request
-            api_data = {
-                "model": "llama3.2:1b",
-                "prompt": tool_context,
-                "stream": False
-            }
+            # Call the Direct Inference Engine
+            response = self.ai_engine.query(prompt, system_prompt)
 
-            print(f"[DEBUG] Sending API request to Ollama...")
-            print(f"[DEBUG] API data: {api_data}")
+            # Check if response contains a JSON tool call or is pure conversation
+            response = response.strip()
 
-            # Make HTTP request to Ollama API
-            response = requests.post(
-                "http://localhost:11434/api/generate",
-                json=api_data,
-                timeout=30  # Longer timeout needed for tool context processing
-            )
+            # Look for JSON tool pattern in the response (e.g., {"tool": "xxx"...)
+            import re
+            import json
 
-            print(f"[DEBUG] HTTP Response status: {response.status_code}")
+            # Find start of JSON tool object
+            json_start = response.find('{"tool":')
+            if json_start != -1:
+                # Extract JSON by counting braces
+                brace_count = 0
+                json_end = json_start
+                for i in range(json_start, len(response)):
+                    if response[i] == '{':
+                        brace_count += 1
+                    elif response[i] == '}':
+                        brace_count -= 1
+                        if brace_count == 0:
+                            json_end = i + 1
+                            break
 
-            if response.status_code == 200:
-                print("Responcse recieved")
-                result = response.json()
-                llm_response = result.get("response", "").strip()
-
-                # Debug: Print raw LLM response
-                print(f"[DEBUG] Raw LLM Response:\n{llm_response}\n")
-
-                # Check if response contains a tool call
-                if "TOOL_CALL:" in llm_response:
-                    print("[DEBUG] Tool call detected, processing...")
-                    tool_result = self.process_tool_call(llm_response)
-                    if tool_result:
-                        print(f"[DEBUG] Tool executed successfully: {tool_result}")
-                        return f"Tool executed: {tool_result}"
-                    else:
-                        print("[DEBUG] Tool execution failed")
-                        return "Tool execution failed or tool not found."
-
-                print(f"[DEBUG] Returning normal response: {llm_response[:100]}...")
-                return llm_response
-            else:
-                error_msg = f"Error: HTTP {response.status_code} - {response.text}"
-                print(f"[DEBUG] {error_msg}")
-                return error_msg
-
-        except requests.exceptions.ConnectionError as e:
-            error_msg = "Error: Cannot connect to Ollama server. Make sure Ollama is installed and running."
-            print(f"[DEBUG] ConnectionError: {e}")
-            return error_msg
-        except requests.exceptions.Timeout as e:
-            error_msg = "Error: Request timed out"
-            print(f"[DEBUG] Timeout: {e}")
-            return error_msg
-        except Exception as e:
-            error_msg = f"Error: {str(e)}"
-            print(f"[DEBUG] Unexpected error: {e}")
-            import traceback
-            traceback.print_exc()
-            return error_msg
-
-    def process_tool_call(self, response):
-        """Process tool calls from the AI response (handles multiple tool calls)"""
-        self.logger.debug(f"Processing tool call from response: {response[:200]}{'...' if len(response) > 200 else ''}")
-
-        try:
-            results = []
-            remaining_response = response
-
-            # Process all tool calls in the response
-            while "TOOL_CALL:" in remaining_response:
-                # Extract tool call
-                tool_call_start = remaining_response.find("TOOL_CALL:")
-                if tool_call_start == -1:
-                    break
-
-                tool_part = remaining_response[tool_call_start:].strip()
-                self.logger.debug(f"Extracted tool part: {tool_part[:100]}{'...' if len(tool_part) > 100 else ''}")
-
-                # Find the end of this tool call (next TOOL_CALL or end of response)
-                next_tool_call = tool_part.find("TOOL_CALL:", 1)
-                if next_tool_call != -1:
-                    # There are more tool calls, process only this one
-                    tool_part = tool_part[:next_tool_call].strip()
-                    remaining_response = remaining_response[tool_call_start + next_tool_call:]
+                if brace_count == 0:  # We found a complete JSON object
+                    json_str = response[json_start:json_end]
+                    # Create a match object for the rest of the code to work
+                    class MockMatch:
+                        def group(self): return json_str
+                    json_match = MockMatch()
                 else:
-                    # This is the last tool call
-                    remaining_response = ""
-
-                # Extract tool name
-                lines = tool_part.split('\n')
-                if len(lines) < 1:
-                    self.logger.warning("Tool call has no lines")
-                    continue
-
-                tool_name = lines[0].replace("TOOL_CALL:", "").strip()
-                self.logger.info(f"Detected tool call: {tool_name}")
-
-                # Extract parameters
-                params = {}
-                if len(lines) > 1 and "PARAMETERS:" in lines[1]:
-                    param_str = lines[1].replace("PARAMETERS:", "").strip()
-                    try:
-                        params = json.loads(param_str)
-                    except json.JSONDecodeError:
-                        # Try to parse simple format like "app_name: firefox"
-                        if ":" in param_str:
-                            # Split only on the first colon to handle values with colons
-                            key, value = param_str.split(":", 1)
-                            key = key.strip()
-                            value = value.strip().strip('"')  # Remove surrounding quotes if present
-
-                            # Map common parameter names
-                            if key in ["app_name", "app", "application"]:
-                                params["app_name"] = value
-                            elif key in ["window_title", "window", "title"]:
-                                params["window_title"] = value
-                            elif key in ["path"]:
-                                params["path"] = value
-                            else:
-                                # For unknown keys, try to infer based on tool
-                                if tool_name == "open_app":
-                                    params["app_name"] = param_str  # Use entire string
-                                elif tool_name == "close_window":
-                                    params["window_title"] = param_str  # Use entire string
-                                elif tool_name == "open_file_browser":
-                                    params["path"] = param_str  # Use entire string
-                        else:
-                            # Handle cases where AI just provides the value (assume based on tool)
-                            param_value = param_str.strip()
-                            if tool_name == "open_app":
-                                params["app_name"] = param_value
-                            elif tool_name == "close_window":
-                                params["window_title"] = param_value
-                            elif tool_name == "open_file_browser":
-                                params["path"] = param_value
-                            # For list_apps and system_info, no parameters needed
-
-                # Execute tool
-                result = self.execute_tool(tool_name, **params)
-                if result:
-                    results.append(result)
-                    self.logger.info(f"Tool executed successfully: {result}")
-
-            if results:
-                # Return combined results
-                return " | ".join(results)
+                    json_match = None
             else:
-                return None
+                json_match = None
+
+            if json_match:
+                try:
+                    # Extract and parse the JSON
+                    json_str = json_match.group()
+                    cmd_data = json.loads(json_str)
+                    tool_name = cmd_data.get("tool")
+                    params = cmd_data.get("parameters", {})
+
+                    # Execute tool
+                    self.logger.info(f"Executing tool: {tool_name} with params: {params}")
+                    result = self.execute_tool(tool_name, **params)
+
+                    # Check if there's additional text around the JSON
+                    if len(response) > len(json_str):
+                        # There was conversational text, so include it
+                        return f"✅ {result}\n\n{response.replace(json_str, '').strip()}"
+                    else:
+                        return f"✅ {result}"
+
+                except (json.JSONDecodeError, KeyError):
+                    # Invalid JSON or missing key, treat as conversation
+                    self.logger.info("AI provided JSON but it was invalid, treating as conversation")
+                    return response
+            else:
+                # Pure conversation response
+                self.logger.info("AI provided conversational response")
+                return response
 
         except Exception as e:
-            return f"Error processing tool call: {e}"
+            self.logger.error(f"Error processing user input: {e}")
+            return f"Error: {str(e)}"
 
     def on_send_clicked(self, button):
         """Handle send button click"""
@@ -591,9 +462,9 @@ User query: {prompt}
         if self.status_label:
             self.status_label.set_text("🤖 Thinking...")
 
-        # Run Ollama query in a separate thread
+        # Run AI query in a separate thread
         def run_query():
-            response = self.query_ollama(prompt)
+            response = self.process_user_input(prompt)
             GLib.idle_add(self.show_response, response)
 
         thread = threading.Thread(target=run_query)
@@ -621,9 +492,7 @@ User query: {prompt}
             # Resize window to fit content after a short delay
             GLib.timeout_add(100, self.resize_window_to_fit_content)
 
-            # Add to conversation history (get the user prompt from the entry before clearing)
-            # Note: We need to get the prompt that was sent, but it's already cleared
-            # For now, we'll store the last prompt in the query method
+            # Add to conversation history
             if hasattr(self, 'last_user_prompt'):
                 self.add_to_history(self.last_user_prompt, response)
 
@@ -790,12 +659,6 @@ User query: {prompt}
 
     def do_activate(self):
         print("Application activating...")
-
-        # Start Ollama server if not running
-        print("Ensuring Ollama server is running...")
-        c=0
-        while not (self.ensure_ollama_server()) and c<10:
-            c+=1
 
         window = Gtk.ApplicationWindow(application=self, title="AI Assistant")
 
@@ -985,7 +848,7 @@ def run_terminal_test(prompt_arg=None):
         print("-" * 50)
 
         try:
-            response = test_app.query_ollama(prompt_arg)
+            response = test_app.process_user_input(prompt_arg)
             print(f"🤖 Response: {response}")
             print("-" * 50)
         except Exception as e:
@@ -1014,6 +877,8 @@ def run_terminal_test(prompt_arg=None):
                 print("- open_app: Open installed applications")
                 print("- close_window: Close windows by title")
                 print("- list_apps: List installed applications")
+                print("- open_file_browser: Open file manager")
+                print("- system_info: Show system information")
                 print()
                 continue
 
@@ -1021,7 +886,7 @@ def run_terminal_test(prompt_arg=None):
             print("-" * 50)
 
             # Test the AI response
-            response = test_app.query_ollama(prompt)
+            response = test_app.process_user_input(prompt)
 
             print(f"🤖 Response: {response}")
             print("-" * 50)
