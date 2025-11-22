@@ -38,7 +38,7 @@ class LocalLLMEngine:
             full_prompt,
             max_tokens=256,
             stop=["<|eot_id|>"],
-            # grammar=self.tool_grammar,  # <--- Temporarily disabled for testing
+            grammar=self.tool_grammar,  # <--- UNCOMMENT THIS
             temperature=0.1  # Low temperature for factual tool use
         )
 

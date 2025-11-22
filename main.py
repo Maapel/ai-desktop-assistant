@@ -7,6 +7,7 @@ import re
 import logging
 from datetime import datetime
 from ai_engine import LocalLLMEngine
+import toon
 
 import gi
 
@@ -72,6 +73,19 @@ class MyApplication(Gtk.Application):
             history_lines.append("")
 
         return "\n".join(history_lines)
+
+    def get_system_state_toon(self):
+        """Compresses system state using TOON for the LLM."""
+        # Create a clean list of just names and executables
+        # We use the FULL list now, not just [:10]
+        apps_data = [{"name": app["name"], "exec": app["exec"]} for app in self.installed_apps]
+
+        context = {
+            "installed_apps": apps_data
+        }
+
+        # Encode to TOON format (Save ~50% tokens)
+        return toon.encode(context)
 
     def setup_logging(self):
         """Setup logging configuration"""
@@ -317,8 +331,8 @@ class MyApplication(Gtk.Application):
             window_title = kwargs.get('window_title', '')
             return self.close_window(window_title)
         elif tool_name == "list_apps":
-            app_list = [app['name'] for app in self.installed_apps[:20]]  # Limit to first 20
-            return f"Installed applications (first 20): {', '.join(app_list)}"
+            app_list = [app['name'] for app in self.installed_apps]  # Use ALL apps now
+            return f"Installed applications ({len(app_list)} total): {', '.join(app_list)}"
         elif tool_name == "open_file_browser":
             path = kwargs.get('path', '')
             return self.open_file_browser(path)
@@ -339,38 +353,23 @@ class MyApplication(Gtk.Application):
             # Get conversation history
             history_context = self.get_formatted_history()
 
-            # Create system prompt with tool information
-            app_list = [app['name'] for app in self.installed_apps[:10]]  # First 10 apps
+            # Simple, clear system prompt
             system_prompt = f"""{history_context}
 
-You are a helpful desktop automation assistant. You can do two things:
+You are a helpful assistant that can chat normally or run tools when asked.
 
-1. **Have normal conversations**: Answer greetings, questions, or chat naturally
-2. **Use tools**: Execute actions on the user's computer when they ask for specific tasks
+RESPONSE RULES:
+- For casual conversation like "hello", "hi", "how are you", "what's up" → respond with friendly conversational text only
+- For specific requests like "open firefox", "show system info" → respond with JSON tool call only
 
-**TOOL USAGE:**
-When the user wants you to perform an action (open app, get info, etc.), respond with a JSON object.
+TOOLS: open_app, list_apps, system_info, close_window, open_file_browser
 
-Available Tools:
-- open_app(app_name: str): Opens any installed application by name
-- close_window(title: str): Closes a window by title
-- list_apps(): Lists installed applications
-- open_file_browser(path: str): Opens file manager at path (optional)
-- system_info(): Shows CPU, memory, and disk usage
-
-Common applications: {', '.join(app_list)}
-
-**RESPONSE FORMAT FOR TOOLS:**
-{{"tool": "tool_name", "parameters": {{"param": "value"}}}}
-
-**CONVERSATION:**
-For everything else, just respond naturally as a helpful assistant.
-
-**GUIDELINES:**
-- Only use tools when the user explicitly asks for an action
-- Greetings like "hello", "how are you" get conversational responses
-- Questions about capabilities get conversational responses
-- Speeches starting with JSON = tool execution
+IMPORTANT:
+- If the message is casual/small talk → conversational response
+- If the message is an action command → JSON tool call only
+- No mixing: Either pure conversation OR pure JSON tool call
+- Example: "hello" → "Hi there!" (conversational)
+- Example: "open firefox" → {{'tool': 'open_app', 'parameters': {{'app_name': 'firefox'}} }}
 """
 
             # Call the Direct Inference Engine
