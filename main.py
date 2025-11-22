@@ -338,6 +338,10 @@ class MyApplication(Gtk.Application):
             return self.open_file_browser(path)
         elif tool_name == "system_info":
             return self.get_system_info()
+        elif tool_name == "chat":
+            # New tool for conversational responses
+            response_text = kwargs.get("response", "")
+            return response_text
         else:
             return f"Unknown tool: {tool_name}"
 
@@ -345,6 +349,20 @@ class MyApplication(Gtk.Application):
         """Process user input using the local AI engine"""
         self.logger.info(f"Processing user prompt: {prompt[:100]}{'...' if len(prompt) > 100 else ''}")
 
+        # 1. FAST PATH: Reflexes (Heuristic Guardrails)
+        # Solves the "socially dysfunctional" issue immediately
+        greetings = ["hi", "hello", "hey", "how are you", "what's up", "hola"]
+        prompt_lower = prompt.lower().strip()
+
+        if prompt_lower in greetings:
+            self.logger.info("Fast path activated: Greeting detected")
+            return "👋 Hi there! I'm your Desktop Assistant. I can open apps, manage windows, or show system info. What do you need?"
+
+        if prompt_lower == "help":
+            self.logger.info("Fast path activated: Help requested")
+            return "I can help you with:\n- Opening apps ('Open Firefox')\n- Closing windows ('Close Terminal')\n- System stats ('System Info')"
+
+        # 2. SLOW PATH: AI Inference continues as before
         if not self.ai_engine:
             self.logger.error("AI Engine not available")
             return "Error: AI Engine not available"
@@ -353,23 +371,33 @@ class MyApplication(Gtk.Application):
             # Get conversation history
             history_context = self.get_formatted_history()
 
-            # Simple, clear system prompt
+            # Updated system prompt for dual-mode: JSON tools OR plain text
             system_prompt = f"""{history_context}
 
-You are a helpful assistant that can chat normally or run tools when asked.
+You are a helpful desktop assistant.
 
-RESPONSE RULES:
-- For casual conversation like "hello", "hi", "how are you", "what's up" → respond with friendly conversational text only
-- For specific requests like "open firefox", "show system info" → respond with JSON tool call only
+AVAILABLE ACTIONS:
+- open_app(app_name): Opens an application by name
+- list_apps(): Shows all installed applications
+- system_info(): Shows CPU, memory, and disk usage
+- close_window(title): Closes a window by title
+- open_file_browser(path): Opens file browser at optional path
 
-TOOLS: open_app, list_apps, system_info, close_window, open_file_browser
+RESPONSE MODES:
+1. For ACTIONS: Output JSON → {{"tool": "tool_name", "parameters": {{...}}}}
+2. For CONVERSATION: Output plain text (no JSON, no quotes)
 
-IMPORTANT:
-- If the message is casual/small talk → conversational response
-- If the message is an action command → JSON tool call only
-- No mixing: Either pure conversation OR pure JSON tool call
-- Example: "hello" → "Hi there!" (conversational)
-- Example: "open firefox" → {{'tool': 'open_app', 'parameters': {{'app_name': 'firefox'}} }}
+EXAMPLES:
+- User: "open firefox" → {{"tool": "open_app", "parameters": {{"app_name": "firefox"}}}}
+- User: "hello" → Hi there! How can I help you?
+- User: "tell me a joke" → Why don't scientists trust atoms? Because they make up everything!
+- User: "show system info" → {{"tool": "system_info", "parameters": {{}}}}
+
+RULES:
+- Use JSON only for tools/actions
+- Use plain text for casual conversation
+- Never mix formats
+- Keep responses friendly and helpful
 """
 
             # Call the Direct Inference Engine

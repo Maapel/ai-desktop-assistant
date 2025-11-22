@@ -15,11 +15,21 @@ class LocalLLMEngine:
             verbose=False
         )
 
-        # Simplified GBNF Grammar for JSON output
-        # This forces the AI to output only valid JSON
+        # Enhanced GBNF Grammar: Allows either JSON tools OR plain text conversation
+        # Solves the "gagged AI" problem by allowing natural responses
         self.tool_grammar = LlamaGrammar.from_string(r'''
-            root ::= object
-            object ::= "{" ws string ":" value ("," ws string ":" value)* "}" | "{" ws "}"
+            root ::= object | chat
+
+            # Tool Call (JSON) - for actions like opening apps
+            object ::= "{" ws "\"tool\"" ":" ws string "," ws "\"parameters\"" ":" ws params "}"
+
+            # Tool Parameters (nested JSON object)
+            params ::= "{" ws (string ":" ws value ("," ws string ":" ws value)*)? "}" | "{" ws "}"
+
+            # Conversational Response (Plain text for chat)
+            chat ::= [^{}]*
+
+            # Standard JSON building blocks
             string ::= "\"" ([^"\\] | "\\" ["\\/bfnrt] | "\\" "u" [0-9a-fA-F]{4})* "\""
             value ::= object | array | string | number | ("true" | "false") | "null"
             array ::= "[" ws (value ("," ws value)*)? ws "]"
